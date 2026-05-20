@@ -392,27 +392,110 @@ function renderAll() {
     renderTable();
 }
 
+const TRONGRID_URL = 'https://api.trongrid.io';
+const ADDRESS = 'TPCvYFgNJbi1pTMAghNv7moLkq4kS77jbk';
+const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+
+async function fetchFromTronGrid() {
+    let url = `${TRONGRID_URL}/v1/accounts/${ADDRESS}/transactions/trc20?limit=200&contract_address=${USDT_CONTRACT}`;
+    let all = [];
+    for (let i = 0; i < 20; i++) {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!data.success || !data.data || data.data.length === 0) break;
+        all = all.concat(data.data);
+        const next = data.meta?.links?.next;
+        if (!next) break;
+        url = next;
+    }
+    return all;
+}
+
+function processRawTransfers(raw) {
+    return raw.map(tx => {
+        const decimals = tx.token_info?.decimals || 6;
+        const value_usdt = parseInt(tx.value) / (10 ** decimals);
+        const direction = tx.to.toUpperCase() === ADDRESS.toUpperCase() ? 'IN' : 'OUT';
+        const dt = new Date(tx.block_timestamp);
+        const pad = n => String(n).padStart(2, '0');
+        const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+        const timeStr = `${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+        return {
+            tx_id: tx.transaction_id,
+            timestamp: tx.block_timestamp,
+            datetime: `${dateStr} ${timeStr}`,
+            date: dateStr,
+            from: tx.from,
+            to: tx.to,
+            value_usdt,
+            direction,
+        };
+    }).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function computeDaily(transfers) {
+    const daily = {};
+    for (const tx of transfers) {
+        if (!daily[tx.date]) daily[tx.date] = { date: tx.date, in: 0, out: 0, net: 0, count: 0 };
+        if (tx.direction === 'IN') daily[tx.date].in += tx.value_usdt;
+        else daily[tx.date].out += tx.value_usdt;
+        daily[tx.date].net = daily[tx.date].in - daily[tx.date].out;
+        daily[tx.date].count++;
+    }
+    return Object.values(daily).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function computeStats(transfers) {
+    const totalIn = transfers.filter(t => t.direction === 'IN').reduce((s, t) => s + t.value_usdt, 0);
+    const totalOut = transfers.filter(t => t.direction === 'OUT').reduce((s, t) => s + t.value_usdt, 0);
+    const sorted = [...transfers].sort((a, b) => a.timestamp - b.timestamp);
+    return {
+        total_in: totalIn,
+        total_out: totalOut,
+        net: totalIn - totalOut,
+        total_tx: transfers.length,
+        first_tx: sorted.length ? sorted[0].datetime.slice(0, 16) : 'N/A',
+        last_tx: sorted.length ? sorted[sorted.length - 1].datetime.slice(0, 16) : 'N/A',
+    };
+}
+
+async function loadFromStaticJSON() {
+    const bust = `?t=${Date.now()}`;
+    const [transfers, daily, stats] = await Promise.all([
+        fetch(`data/transfers.json${bust}`).then(r => r.json()),
+        fetch(`data/daily.json${bust}`).then(r => r.json()),
+        fetch(`data/stats.json${bust}`).then(r => r.json()),
+    ]);
+    return { transfers, daily, stats };
+}
+
 async function loadData() {
-    document.getElementById('lastUpdate').textContent = 'Loading...';
+    document.getElementById('lastUpdate').textContent = 'Loading (live from TronGrid)...';
     try {
-        const base = location.href.includes('github.io') ? '' : '';
-        const [transfers, daily, stats] = await Promise.all([
-            fetch(`${base}data/transfers.json`).then(r => r.json()),
-            fetch(`${base}data/daily.json`).then(r => r.json()),
-            fetch(`${base}data/stats.json`).then(r => r.json()),
-        ]);
-
+        const raw = await fetchFromTronGrid();
+        const transfers = processRawTransfers(raw);
         allTransfers = transfers;
-        allDaily = daily;
-        statsData = stats;
-
+        allDaily = computeDaily(transfers);
+        statsData = computeStats(transfers);
         renderAll();
-
-        const updated = stats.updated_at || 'Unknown';
-        document.getElementById('lastUpdate').textContent = `Data updated: ${updated}`;
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        document.getElementById('lastUpdate').textContent =
+            `Live data: ${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     } catch (err) {
-        document.getElementById('lastUpdate').textContent = `Error loading data`;
-        console.error(err);
+        console.warn('TronGrid fetch failed, falling back to static JSON:', err);
+        document.getElementById('lastUpdate').textContent = 'Loading (fallback)...';
+        try {
+            const data = await loadFromStaticJSON();
+            allTransfers = data.transfers;
+            allDaily = data.daily;
+            statsData = data.stats;
+            renderAll();
+            document.getElementById('lastUpdate').textContent = `Static data: ${data.stats.updated_at || 'Unknown'}`;
+        } catch (err2) {
+            document.getElementById('lastUpdate').textContent = 'Error loading data';
+            console.error(err2);
+        }
     }
 }
 
@@ -426,6 +509,7 @@ document.querySelectorAll('.controls button').forEach(btn => {
 });
 
 loadData();
+setInterval(loadData, 5 * 60 * 1000);
 </script>
 </body>
 </html>
