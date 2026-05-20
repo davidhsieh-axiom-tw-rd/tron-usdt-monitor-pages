@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON USDT Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --card: #1a1d28;
+            --border: #2a2d3a;
+            --text: #e4e4e7;
+            --muted: #71717a;
+            --green: #22c55e;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --purple: #a855f7;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Helvetica Neue', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 24px;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header .address {
+            font-size: 13px;
+            color: var(--muted);
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .header .address a { color: var(--blue); text-decoration: none; }
+        .header .address a:hover { text-decoration: underline; }
+        .controls { display: flex; gap: 8px; }
+        .controls button {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+        .controls button:hover { border-color: var(--blue); }
+        .controls button.active {
+            background: var(--blue);
+            border-color: var(--blue);
+            color: white;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+        }
+        .stat-card .label {
+            font-size: 12px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .stat-card .value {
+            font-size: 26px;
+            font-weight: 700;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .stat-card .sub {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+        .green { color: var(--green); }
+        .red { color: var(--red); }
+        .blue { color: var(--blue); }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+        .chart-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 18px;
+        }
+        .chart-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 14px;
+            color: var(--muted);
+        }
+        .chart-card.wide { grid-column: 1 / -1; }
+        .table-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .table-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            padding: 16px 18px;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+        }
+        table { width: 100%; border-collapse: collapse; }
+        thead th {
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.2);
+        }
+        tbody td {
+            padding: 10px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+        }
+        tbody tr:hover { background: rgba(255,255,255,0.02); }
+        .dir-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .dir-in { background: rgba(34,197,94,0.15); color: var(--green); }
+        .dir-out { background: rgba(239,68,68,0.15); color: var(--red); }
+        .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
+        .tx-link { color: var(--blue); text-decoration: none; }
+        .tx-link:hover { text-decoration: underline; }
+        .loading { text-align: center; padding: 40px; color: var(--muted); }
+        .last-update { font-size: 12px; color: var(--muted); }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .stat-card .value { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>TRON USDT Monitor</h1>
+            <div class="address">
+                <a href="https://tronscan.org/#/address/TPCvYFgNJbi1pTMAghNv7moLkq4kS77jbk" target="_blank">
+                    TPCvYFgNJbi1pTMAghNv7moLkq4kS77jbk
+                </a>
+            </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <span class="last-update" id="lastUpdate"></span>
+            <div class="controls">
+                <button class="active" data-days="30">30D</button>
+                <button data-days="60">60D</button>
+                <button data-days="90">90D</button>
+                <button data-days="180">180D</button>
+                <button data-days="99999">ALL</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-card"><div class="label">Loading...</div><div class="value">-</div></div>
+    </div>
+
+    <div class="charts-grid">
+        <div class="chart-card wide">
+            <h3>Daily In/Out Flow</h3>
+            <canvas id="flowChart" height="80"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Cumulative Net Flow</h3>
+            <canvas id="cumulativeChart" height="160"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>In vs Out Distribution</h3>
+            <canvas id="pieChart" height="160"></canvas>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <h3>Transaction History</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Direction</th>
+                        <th>Amount (USDT)</th>
+                        <th>Counterparty</th>
+                        <th>TX Hash</th>
+                    </tr>
+                </thead>
+                <tbody id="txTable">
+                    <tr><td colspan="5" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+<script>
+let currentDays = 30;
+let flowChart, cumulativeChart, pieChart;
+let allTransfers = [];
+let allDaily = [];
+let statsData = {};
+
+Chart.defaults.color = '#71717a';
+Chart.defaults.borderColor = '#2a2d3a';
+
+function shortAddr(addr) {
+    return addr ? addr.slice(0, 6) + '...' + addr.slice(-4) : '';
+}
+
+function formatNum(n) {
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function filterByDays(data, days, dateKey) {
+    if (days >= 99999) return data;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return data.filter(d => d[dateKey] >= cutoffStr);
+}
+
+function renderStats() {
+    const s = statsData;
+    document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-card">
+            <div class="label">Total In</div>
+            <div class="value green">+${formatNum(s.total_in)}</div>
+            <div class="sub">USDT received</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total Out</div>
+            <div class="value red">-${formatNum(s.total_out)}</div>
+            <div class="sub">USDT sent</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Net Flow</div>
+            <div class="value ${s.net >= 0 ? 'green' : 'red'}">${s.net >= 0 ? '+' : ''}${formatNum(s.net)}</div>
+            <div class="sub">Balance change</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Transactions</div>
+            <div class="value blue">${s.total_tx}</div>
+            <div class="sub">${s.first_tx} ~ ${s.last_tx}</div>
+        </div>
+    `;
+}
+
+function renderCharts() {
+    const daily = filterByDays(allDaily, currentDays, 'date');
+    const labels = daily.map(d => d.date);
+    const inData = daily.map(d => d.in);
+    const outData = daily.map(d => -d.out);
+
+    let cumulative = [];
+    let sum = 0;
+    for (const d of daily) {
+        sum += d.in - d.out;
+        cumulative.push(sum);
+    }
+
+    if (flowChart) flowChart.destroy();
+    flowChart = new Chart(document.getElementById('flowChart'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: 'In', data: inData, backgroundColor: 'rgba(34, 197, 94, 0.7)', borderRadius: 3 },
+                { label: 'Out', data: outData, backgroundColor: 'rgba(239, 68, 68, 0.7)', borderRadius: 3 }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: { stacked: true, ticks: { callback: v => (v >= 0 ? '+' : '') + formatNum(v) } }
+            },
+            plugins: {
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatNum(Math.abs(ctx.raw))} USDT` } }
+            }
+        }
+    });
+
+    if (cumulativeChart) cumulativeChart.destroy();
+    cumulativeChart = new Chart(document.getElementById('cumulativeChart'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Cumulative Net',
+                data: cumulative,
+                borderColor: '#a855f7',
+                backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { display: false } },
+                y: { ticks: { callback: v => formatNum(v) } }
+            },
+            plugins: {
+                tooltip: { callbacks: { label: ctx => `Net: ${formatNum(ctx.raw)} USDT` } }
+            }
+        }
+    });
+
+    const totalIn = daily.reduce((s, d) => s + d.in, 0);
+    const totalOut = daily.reduce((s, d) => s + d.out, 0);
+
+    if (pieChart) pieChart.destroy();
+    pieChart = new Chart(document.getElementById('pieChart'), {
+        type: 'doughnut',
+        data: {
+            labels: ['In', 'Out'],
+            datasets: [{
+                data: [totalIn, totalOut],
+                backgroundColor: ['rgba(34, 197, 94, 0.8)', 'rgba(239, 68, 68, 0.8)'],
+                borderWidth: 0,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatNum(ctx.raw)} USDT` } }
+            }
+        }
+    });
+}
+
+function renderTable() {
+    const transfers = filterByDays(allTransfers, currentDays, 'date');
+    const tbody = document.getElementById('txTable');
+
+    if (transfers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">No transfers found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = transfers.map(tx => {
+        const dirClass = tx.direction === 'IN' ? 'dir-in' : 'dir-out';
+        const dirLabel = tx.direction === 'IN' ? 'IN' : 'OUT';
+        const counterparty = tx.direction === 'IN' ? tx.from : tx.to;
+        const sign = tx.direction === 'IN' ? '+' : '-';
+        const colorClass = tx.direction === 'IN' ? 'green' : 'red';
+        const txUrl = `https://tronscan.org/#/transaction/${tx.tx_id}`;
+
+        return `<tr>
+            <td class="mono">${tx.datetime}</td>
+            <td><span class="dir-badge ${dirClass}">${dirLabel}</span></td>
+            <td class="mono ${colorClass}">${sign}${formatNum(tx.value_usdt)}</td>
+            <td class="mono"><a href="https://tronscan.org/#/address/${counterparty}" target="_blank" class="tx-link">${shortAddr(counterparty)}</a></td>
+            <td class="mono"><a href="${txUrl}" target="_blank" class="tx-link">${tx.tx_id.slice(0, 12)}...</a></td>
+        </tr>`;
+    }).join('');
+}
+
+function renderAll() {
+    renderStats();
+    renderCharts();
+    renderTable();
+}
+
+async function loadData() {
+    document.getElementById('lastUpdate').textContent = 'Loading...';
+    try {
+        const base = location.href.includes('github.io') ? '' : '';
+        const [transfers, daily, stats] = await Promise.all([
+            fetch(`${base}data/transfers.json`).then(r => r.json()),
+            fetch(`${base}data/daily.json`).then(r => r.json()),
+            fetch(`${base}data/stats.json`).then(r => r.json()),
+        ]);
+
+        allTransfers = transfers;
+        allDaily = daily;
+        statsData = stats;
+
+        renderAll();
+
+        const updated = stats.updated_at || 'Unknown';
+        document.getElementById('lastUpdate').textContent = `Data updated: ${updated}`;
+    } catch (err) {
+        document.getElementById('lastUpdate').textContent = `Error loading data`;
+        console.error(err);
+    }
+}
+
+document.querySelectorAll('.controls button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentDays = parseInt(btn.dataset.days);
+        renderAll();
+    });
+});
+
+loadData();
+</script>
+</body>
+</html>
